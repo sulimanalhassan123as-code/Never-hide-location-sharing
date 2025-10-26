@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>NEVER HIDE — Location (Supabase)</title>
+
+  <!-- Leaflet for map (optional, mobile friendly) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    :root { --bg:#071028; --card: rgba(255,255,255,0.04); --accent: #6b5df6; }
+    body{ margin:0; font-family:Inter,system-ui,Arial; background:linear-gradient(135deg,#071028,#0f1730 60%); color:#e6eef8; padding:12px; -webkit-font-smoothing:antialiased;}
+    header{display:flex;align-items:center;gap:12px; margin-bottom:10px}
+    h1{font-size:18px;margin:0;color:#a9b3ff;letter-spacing:2px}
+    .btn{padding:10px 14px;border-radius:10px;border:0;background:linear-gradient(145deg,var(--accent),#3b2fd6); color:white; cursor:pointer}
+    .card{background:var(--card); padding:12px; border-radius:12px; box-shadow:0 6px 18px rgba(0,0,0,0.4);}
+    #controls{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+    #locationsList{margin-top:10px}
+    .user{padding:8px;border-radius:10px;margin-bottom:8px;background:rgba(255,255,255,0.02)}
+    small{color:#9aa6c7}
+    #map{height: 55vh; border-radius:10px; overflow:hidden; margin-top:10px}
+    .top-right{margin-left:auto}
+    @media(min-width:720px){ body{padding:24px} #map{height:62vh} }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>NEVER HIDE — LOCATION</h1>
+      <small>Consensual real-time sharing</small>
+    </div>
+    <div class="top-right">
+      <button id="signin" class="btn">Sign in (Google)</button>
+      <button id="signout" class="btn" style="display:none;background:#2d3748">Sign out</button>
+    </div>
+  </header>
+
+  <div id="me" class="card" style="display:none"></div>
+
+  <div id="controls" class="card" style="display:none">
+    <label style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="shareToggle"/>
+      <strong>Share my location</strong>
+    </label>
+    <small>When enabled, your browser will ask for permission.</small>
+  </div>
+
+  <div id="locationsSection" class="card">
+    <h3 style="margin:0 0 8px 0">Live Locations</h3>
+    <div id="locationsList">No users currently sharing.</div>
+    <div id="map" style="display:none"></div>
+  </div>
+
+  <!-- Supabase client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.25.0/dist/supabase.min.js"></script>
+  <!-- Leaflet -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    // ---------- CONFIG ----------
+    const SUPABASE_URL = "https://YOUR_SUPABASE_URL.supabase.co"; // from Project Settings -> API (replace)
+    const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";           // anon public key
+
+    const supabase = supabaseLib.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // ---------- UI ELs ----------
+    const signinBtn = document.getElementById('signin');
+    const signoutBtn = document.getElementById('signout');
+    const meDiv = document.getElementById('me');
+    const controls = document.getElementById('controls');
+    const shareToggle = document.getElementById('shareToggle');
+    const locationsList = document.getElementById('locationsList');
+    const locationsSection = document.getElementById('locationsSection');
+    const mapEl = document.getElementById('map');
+
+    let shareInterval = null;
+    let currentUser = null;
+    let map = null;
+    let markers = {}; // uid -> marker
+
+    // ---------- AUTH ----------
+    signinBtn.onclick = async () => {
+      // redirect to provider (popup not allowed on some mobile flows) — supabase handles redirect
+      await supabase.auth.signInWithOAuth({ provider: 'google' });
+    };
+
+    signoutBtn.onclick = async () => {
+      await supabase.auth.signOut();
+      location.href = location.pathname; // reload cleanly
+    };
+
+    // handle redirect result on page load (if OAuth returned)
+    (async function handleRedirect() {
+      const { data, error } = await supabase.auth.getSessionFromUrl();
+      if (error) console.log('redirect error', error);
+      // continue to onAuthStateChanged below
+    })();
+
+    // Listen auth changes
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (session && session.user) {
+        currentUser = session.user;
+        onSignedIn(session.user);
+      } else {
+        onSignedOut();
+      }
+    });
+
+    // If page loaded and user already signed in
+    (async function init() {
+      const { data } = await supabase.auth.getSession();
+      if (data.session && data.session.user) {
+        currentUser = data.session.user;
+        onSignedIn(data.session.user);
+      }
+      // Start listening to locations realtime
+      subscribeToLocations();
+    })();
+
+    // ---------- UI handlers ----------
+    function onSignedIn(user) {
+      signinBtn.style.display = 'none';
+      signoutBtn.style.display = 'inline-block';
+      meDiv.style.display = 'block';
+      controls.style.display = 'block';
+      meDiv.innerHTML = `<strong>${user.user_metadata.full_name || user.email}</strong><br><small>${user.email}</small>`;
+    }
+    function onSignedOut() {
+      signinBtn.style.display = 'inline-block';
+      signoutBtn.style.display = 'none';
+      meDiv.style.display = 'none';
+      controls.style.display = 'none';
+      shareToggle.checked = false;
+    }
+
+    // ---------- LOCATION SHARING ----------
+    shareToggle.addEventListener('change', () => {
+      if (shareToggle.checked) startSharing(); else stopSharing();
+    });
+
+    async function startSharing() {
+      if (!currentUser) return alert('Sign in first.');
+      if (!navigator.geolocation) return alert('Geolocation not supported.');
+
+      // immediate update + repeat every 8 seconds (adjust for battery)
+      await sendLocationOnce();
+      shareInterval = setInterval(sendLocationOnce, 8000);
+    }
+
+    async function stopSharing() {
+      if (shareInterval) { clearInterval(shareInterval); shareInterval = null; }
+      if (!currentUser) return;
+      try {
+        await supabase.from('locations').delete().eq('user_id', currentUser.id);
+      } catch (e) { console.error(e); }
+    }
+
+    async function sendLocationOnce() {
+      navigator.geolocation.getCurrentPosition(async pos => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        const payload = {
+          user_id: currentUser.id,
+          name: currentUser.user_metadata.full_name || currentUser.email,
+          photo: (currentUser.user_metadata.avatar_url || null),
+          lat, lon,
+          shared: true,
+          updated_at: new Date().toISOString()
+        };
+
+        // upsert by user_id (insert or update)
+        const { error } = await supabase
+          .from('locations')
+          .upsert(payload, { onConflict: ['user_id'] });
+
+        if (error) console.error('upsert error', error);
+      }, err => {
+        console.error('Geolocation permission error', err);
+        alert('Please allow location permissions. Sharing stopped.');
+        shareToggle.checked = false;
+        stopSharing();
+      }, { enableHighAccuracy: true, maximumAge: 5000 });
+    }
+
+    // ---------- Realtime subscription ----------
+    async function subscribeToLocations() {
+      // initial load
+      const { data, error } = await supabase.from('locations').select('*');
+      if (error) console.error(error);
+      renderLocations(data || []);
+
+      // realtime: listen for INSERT/UPDATE/DELETE on locations
+      supabase.channel('public:locations')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'locations' }, payload => {
+          // payload has {eventType, new, old}
+          // fetch fresh list and render (simple approach)
+          refreshLocations();
+        })
+        .subscribe();
+    }
+
+    async function refreshLocations() {
+      const { data } = await supabase.from('locations').select('*');
+      renderLocations(data || []);
+    }
+
+    // ---------- render list + map ----------
+    function renderLocations(rows) {
+      if (!rows.length) {
+        locationsList.innerHTML = 'No users currently sharing.';
+        mapEl.style.display = 'none';
+        return;
+      }
+      // show list
+      locationsList.innerHTML = '';
+      rows.forEach(r => {
+        const div = document.createElement('div');
+        div.className = 'user';
+        const ts = new Date(r.updated_at).toLocaleString();
+        div.innerHTML = `<strong>${escapeHtml(r.name || 'Unknown')}</strong> <small>${ts}</small>
+                         <div>Lat: ${r.lat.toFixed(6)}, Lon: ${r.lon.toFixed(6)}</div>`;
+        locationsList.appendChild(div);
+      });
+
+      // map show
+      mapEl.style.display = 'block';
+      if (!map) initMap(rows);
+      else updateMapMarkers(rows);
+    }
+
+    function initMap(rows) {
+      map = L.map('map', { zoomControl: true }).setView([rows[0].lat, rows[0].lon], 13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+      updateMapMarkers(rows);
+    }
+
+    function updateMapMarkers(rows) {
+      // remove missing markers
+      const currentUids = new Set(rows.map(r => r.user_id));
+      for (const uid of Object.keys(markers)) {
+        if (!currentUids.has(uid)) {
+          map.removeLayer(markers[uid]);
+          delete markers[uid];
+        }
+      }
+      // add/update markers
+      rows.forEach(r => {
+        if (markers[r.user_id]) {
+          markers[r.user_id].setLatLng([r.lat, r.lon]);
+        } else {
+          const m = L.marker([r.lat, r.lon]).addTo(map).bindPopup(`${escapeHtml(r.name || 'User')}`);
+          markers[r.user_id] = m;
+        }
+      });
+      // adjust bounds
+      const group = Object.values(markers).map(m => m.getLatLng());
+      if (group.length) {
+        const bounds = L.latLngBounds(group);
+        map.fitBounds(bounds.pad(0.2), { maxZoom: 16 });
+      }
+    }
+
+    // ---------- helpers ----------
+    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  </script>
+</body>
+    </html>
