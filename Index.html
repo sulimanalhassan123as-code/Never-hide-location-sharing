@@ -58,11 +58,10 @@
 
   <script>
     // ---------- CONFIG ----------
-    const SUPABASE_URL = "https://YOUR_SUPABASE_URL.supabase.co"; // from Project Settings -> API (replace)
-    const supabaseKey = 'YOUR_PUBLIC_ANON_KEY'        // anon public key
+    const SUPABASE_URL = "https://iebcbvlfdzudrinosshv.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImllYmNidmxmZHp1ZHJpbm9zc2h2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE1MDg5NTMsImV4cCI6MjA3NzA4NDk1M30.6-XwuwryT84txvbY-_T_e7FlzhexU_Bl75azzSmVJfA";
 
-    const supabase = supabaseLib.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
+const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     // ---------- UI ELs ----------
     const signinBtn = document.getElementById('signin');
     const signoutBtn = document.getElementById('signout');
