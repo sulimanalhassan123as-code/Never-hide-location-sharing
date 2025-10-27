@@ -1,8 +1,12 @@
+// ✅ Setup Supabase client
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
 const supabaseUrl = "https://iebcbvlfdzudrinosshv.supabase.co";
 const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImllYmNidmxmZHp1ZHJpbm9zc2h2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE1MDg5NTMsImV4cCI6MjA3NzA4NDk1M30.6-XwuwryT84txvbY-_T_e7FlzhexU_Bl75azzSmVJfA";
 
-const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(supabaseUrl, supabaseKey);
 
+// ✅ DOM elements
 const signinBtn = document.getElementById('signin');
 const signoutBtn = document.getElementById('signout');
 const meSpan = document.getElementById('me');
@@ -13,19 +17,25 @@ const locationsList = document.getElementById('locationsList');
 let uid = null;
 let shareInterval = null;
 
+// ✅ Sign in with Google
 signinBtn.onclick = async () => {
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google'
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: window.location.origin // ✅ works after login redirect
+    }
   });
   if (error) alert(error.message);
 };
 
+// ✅ Sign out
 signoutBtn.onclick = async () => {
   await supabase.auth.signOut();
   uid = null;
   stopSharing();
 };
 
+// ✅ Track login state
 supabase.auth.onAuthStateChange((_event, session) => {
   if (session?.user) {
     uid = session.user.id;
@@ -38,10 +48,11 @@ supabase.auth.onAuthStateChange((_event, session) => {
     signinBtn.style.display = 'inline-block';
     signoutBtn.style.display = 'none';
     controls.style.display = 'none';
-    locationsList.innerHTML = 'Not signed in';
+    locationsList.textContent = "Not signed in";
   }
 });
 
+// ✅ Toggle sharing location
 shareToggle.onchange = () => {
   if (shareToggle.checked) startSharing();
   else stopSharing();
@@ -69,10 +80,12 @@ function updateLoc() {
 
 function listenLocations() {
   supabase
-    .channel('loc')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'locations' },
+    .channel("loc")
+    .on("postgres_changes",
+      { event: "*", schema: "public", table: "locations" },
       loadLocations
-    ).subscribe();
+    )
+    .subscribe();
 
   loadLocations();
 }
@@ -80,10 +93,11 @@ function listenLocations() {
 async function loadLocations() {
   const { data } = await supabase.from("locations").select("*");
   if (!data.length) return locationsList.textContent = "No users sharing yet.";
+
   locationsList.innerHTML = "";
   data.forEach(u => {
-    const d = document.createElement('div');
-    d.textContent = `User: ${u.id} | Lat: ${u.lat.toFixed(5)} | Lon: ${u.lon.toFixed(5)}`;
-    locationsList.appendChild(d);
+    const div = document.createElement("div");
+    div.textContent = `User: ${u.id} | Lat: ${u.lat.toFixed(5)} | Lon: ${u.lon.toFixed(5)}`;
+    locationsList.appendChild(div);
   });
-                   }
+      }
