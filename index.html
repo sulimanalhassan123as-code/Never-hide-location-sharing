@@ -1,21 +1,29 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NEVER HIDE CHAT</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Never Hide Location Sharing</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <h2>NEVER HIDE — Location Sharing</h2>
 
-<h2>NEVER HIDE CHAT</h2>
+  <div id="auth-area">
+    <button id="signin">Sign in with Google</button>
+    <button id="signout" style="display:none;">Sign out</button>
+    <span id="me"></span>
+  </div>
 
-<div id="auth-box">
-  <button id="googleLogin">Sign in with Google</button>
-  <p id="userInfo" style="display:none;"></p>
-  <button id="logout" style="display:none;">Logout</button>
-</div>
+  <div id="controls" style="display:none;">
+    <label><input type="checkbox" id="shareToggle" /> Share my location</label>
+  </div>
 
-<script type="module" src="script.js"></script>
+  <h3>Live Users</h3>
+  <div id="locationsList">Loading...</div>
+
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="script.js"></script>
 </body>
 </html>
